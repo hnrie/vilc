@@ -18,7 +18,6 @@ on:
 
 permissions:
   contents: write
-  packages: write
 
 env:
   VLC_VERSION: ${{ github.ref_name || inputs.version || 'dev' }}
@@ -56,6 +55,7 @@ jobs:
     needs: generate-tag
     runs-on: windows-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: i686
@@ -74,16 +74,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        shell: bash
-        run: |
-          # Install MinGW and other build tools
-          choco install -y mingw msys2
-          echo "C:\msys64\usr\bin" >> $GITHUB_PATH
-          echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            git
+            make
+            autoconf
+            automake
+            libtool
+            pkg-config
+            nasm
+            meson
+            ninja
 
       - name: Build VLC for ${{ matrix.platform }}
-        shell: bash
+        shell: msys2 {0}
         run: |
           # Set environment
           export HOST_ARCH=${{ matrix.arch }}
@@ -95,16 +105,18 @@ jobs:
           ./build.sh -a $HOST_ARCH -x
 
       - name: Package artifacts
-        shell: bash
+        shell: msys2 {0}
         run: |
           # Create zip package
-          ${{ matrix.triplet }}-7z a vlc-${{ needs.generate-tag.outputs.version }}-${{ matrix.platform }}.zip vlc-${{ matrix.platform }}/
+          cd extras/package/win32
+          7z a ../../../vlc-${{ needs.generate-tag.outputs.version }}-${{ matrix.platform }}.zip vlc-${{ matrix.platform }}/ 2>/dev/null || \
+            zip -r ../../../vlc-${{ needs.generate-tag.outputs.version }}-${{ matrix.platform }}.zip vlc-${{ matrix.platform }}/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: vlc-${{ matrix.platform }}
-          path: vlc-${{ matrix.platform }}-${{ matrix.platform }}.zip
+          path: vlc-${{ needs.generate-tag.outputs.version }}-${{ matrix.platform }}.zip
           retention-days: 30
 
   # macOS builds
@@ -112,6 +124,7 @@ jobs:
     needs: generate-tag
     runs-on: macos-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x86_64
@@ -126,9 +139,6 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # Install Xcode command line tools (ignore if already installed)
-          xcode-select --install 2>/dev/null || true
-          
           # Install dependencies via Homebrew
           brew install autoconf automake libtool pkg-config
 
@@ -160,14 +170,17 @@ jobs:
     needs: generate-tag
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x86_64
             platform: linux-x86_64
             triplet: x86_64-linux-gnu
+            cross_pkg: ""
           - arch: arm
             platform: linux-arm
             triplet: arm-linux-gnueabihf
+            cross_pkg: "gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf"
 
     steps:
       - uses: actions/checkout@v4
@@ -181,13 +194,10 @@ jobs:
             libxinerama-dev libxpm-dev libxrandr-dev libxrender-dev \
             libxss-dev libxt-dev libxxf86vm-dev libxv-dev libx11-xcb-dev \
             cmake nasm yasm libasound2-dev libpulse-dev \
-            libmodplug-dev libqt5opengl5-dev libqt5svg5-dev libqt5x11extras5-dev \
-            qml-module-qtquick2 qtbase5-dev qtdeclarative5-dev
+            libmodplug-dev ninja-build ${{ matrix.cross_pkg }}
           
-          # Install newer meson version
-          pip3 install meson==1.3.0
-          # Install ninja-build
-          sudo apt-get install -y ninja-build
+          # Install latest meson version (VLC requires >= 1.10.0)
+          pip3 install --break-system-packages meson
 
       - name: Build VLC for ${{ matrix.platform }}
         run: |
@@ -195,19 +205,16 @@ jobs:
           export HOST_ARCH=${{ matrix.arch }}
           export TRIPLET=${{ matrix.triplet }}
           
-          # Build using meson
-          meson setup build-${{ matrix.platform }} -Db_coverage=true
-          ninja -C build-${{ matrix.platform }}
-          
-          # Or use autotools
-          # ./bootstrap
-          # ./configure
-          # make -j$(nproc)
+          # Build using autotools (the primary build system for VLC)
+          ./bootstrap
+          ./configure --build=${TRIPLET} --host=${TRIPLET}
+          make -j$(nproc)
 
       - name: Package artifacts
         run: |
           # Create tar.gz package
-          tar -czf vlc-${{ needs.generate-tag.outputs.version }}-${{ matrix.platform }}.tar.gz -C build-${{ matrix.platform }} .
+          make install DESTDIR=$(pwd)/install
+          tar -czf vlc-${{ needs.generate-tag.outputs.version }}-${{ matrix.platform }}.tar.gz -C install .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -221,6 +228,7 @@ jobs:
     needs: generate-tag
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: arm
@@ -239,17 +247,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Android SDK
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r28b
+          add-to-path: false
+
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: 'ndk;28.0.12674087'
+          packages: 'platform-tools'
 
       - name: Build VLC for ${{ matrix.platform }}
         run: |
           # Set environment
           export ANDROID_ARCH=${{ matrix.arch }}
           export TRIPLET=${{ matrix.triplet }}
-          export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.0.12674087
+          export ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }}
           
           # Clone libvlcjni
           git clone https://code.videolan.org/videolan/libvlcjni.git
@@ -262,7 +277,8 @@ jobs:
         run: |
           # Create zip package
           cd libvlcjni
-          7z a ../vlc-${{ needs.generate-tag.outputs.version }}-${{ matrix.platform }}.zip vlc-${{ matrix.platform }}/
+          zip -r ../vlc-${{ needs.generate-tag.outputs.version }}-${{ matrix.platform }}.zip vlc-${{ matrix.platform }}/ 2>/dev/null || \
+            7z a ../vlc-${{ needs.generate-tag.outputs.version }}-${{ matrix.platform }}.zip vlc-${{ matrix.platform }}/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -277,6 +293,7 @@ jobs:
     runs-on: macos-latest
     if: contains(github.event.inputs.platforms, 'ios') || contains(github.event.inputs.platforms, 'tvos') || github.ref_type == 'tag'
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: arm64
@@ -291,9 +308,6 @@ jobs:
           - arch: arm64
             platform: tvos-arm64
             sdk: appletvos
-          - arch: arm64_32
-            platform: watchos-arm64_32
-            sdk: watchos
 
     steps:
       - uses: actions/checkout@v4
@@ -314,7 +328,8 @@ jobs:
         run: |
           # Create zip package
           cd build
-          7z a ../vlc-${{ needs.generate-tag.outputs.version }}-${{ matrix.platform }}.zip vlc-${{ matrix.platform }}/
+          zip -r ../vlc-${{ needs.generate-tag.outputs.version }}-${{ matrix.platform }}.zip vlc-${{ matrix.platform }}/ 2>/dev/null || \
+            7z a ../vlc-${{ needs.generate-tag.outputs.version }}-${{ matrix.platform }}.zip vlc-${{ matrix.platform }}/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -327,10 +342,7 @@ jobs:
   create-release:
     needs: [generate-tag, build-windows, build-macos, build-linux, build-android]
     runs-on: ubuntu-latest
-    if: github.ref_type == 'tag' || github.event.inputs.version != ''
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-      release_id: ${{ steps.create_release.outputs.id }}
+    if: always() && (github.ref_type == 'tag' || github.event.inputs.version != '')
     
     steps:
       - name: Download all artifacts
@@ -339,8 +351,10 @@ jobs:
           path: artifacts/
           merge-multiple: true
 
+      - name: List artifacts
+        run: find artifacts/ -type f | head -50
+
       - name: Create GitHub Release
-        id: create_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.generate-tag.outputs.tag }}
