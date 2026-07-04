@@ -75,6 +75,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
+        shell: bash
         run: |
           # Install MinGW and other build tools
           choco install -y mingw msys2
@@ -82,6 +83,7 @@ jobs:
           echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
 
       - name: Build VLC for ${{ matrix.platform }}
+        shell: bash
         run: |
           # Set environment
           export HOST_ARCH=${{ matrix.arch }}
@@ -93,6 +95,7 @@ jobs:
           ./build.sh -a $HOST_ARCH -x
 
       - name: Package artifacts
+        shell: bash
         run: |
           # Create zip package
           ${{ matrix.triplet }}-7z a vlc-${{ needs.generate-tag.outputs.version }}-${{ matrix.platform }}.zip vlc-${{ matrix.platform }}/
@@ -123,8 +126,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # Install Xcode command line tools
-          xcode-select --install
+          # Install Xcode command line tools (ignore if already installed)
+          xcode-select --install 2>/dev/null || true
           
           # Install dependencies via Homebrew
           brew install autoconf automake libtool pkg-config
@@ -177,11 +180,14 @@ jobs:
             libxcb-randr0-dev libxcb-composite0-dev libx11-dev libxext-dev \
             libxinerama-dev libxpm-dev libxrandr-dev libxrender-dev \
             libxss-dev libxt-dev libxxf86vm-dev libxv-dev libx11-xcb-dev \
-          meson ninja-build cmake nasm yasm libasound2-dev libpulse-dev \
-          libmodplug-dev libqt5opengl5-dev libqt5svg5-dev libqt5x11extras5-dev \
-          qml-module-qtquick2 qtbase5-dev qtdeclarative5-dev libx11-dev \
-          libxext-dev libxinerama-dev libxpm-dev libxrandr-dev libxrender-dev \
-          libxss-dev libxt-dev libxxf86vm-dev libxv-dev libx11-xcb-dev
+            cmake nasm yasm libasound2-dev libpulse-dev \
+            libmodplug-dev libqt5opengl5-dev libqt5svg5-dev libqt5x11extras5-dev \
+            qml-module-qtquick2 qtbase5-dev qtdeclarative5-dev
+          
+          # Install newer meson version
+          pip3 install meson==1.3.0
+          # Install ninja-build
+          sudo apt-get install -y ninja-build
 
       - name: Build VLC for ${{ matrix.platform }}
         run: |
@@ -236,16 +242,14 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          api-level: 21
-          build-tools: 33.0.0
-          ndk-version: 25.1.8937393
+          packages: 'ndk;28.0.12674087'
 
       - name: Build VLC for ${{ matrix.platform }}
         run: |
           # Set environment
           export ANDROID_ARCH=${{ matrix.arch }}
           export TRIPLET=${{ matrix.triplet }}
-          export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.1.8937393
+          export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.0.12674087
           
           # Clone libvlcjni
           git clone https://code.videolan.org/videolan/libvlcjni.git
