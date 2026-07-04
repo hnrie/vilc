@@ -91,6 +91,9 @@ jobs:
             nasm
             meson
             ninja
+            patch
+            texinfo
+            dos2unix
 
       - name: Build VLC for ${{ matrix.platform }}
         shell: msys2 {0}
@@ -194,7 +197,19 @@ jobs:
             libxinerama-dev libxpm-dev libxrandr-dev libxrender-dev \
             libxss-dev libxt-dev libxxf86vm-dev libxv-dev libx11-xcb-dev \
             cmake nasm yasm libasound2-dev libpulse-dev \
-            libmodplug-dev ninja-build ${{ matrix.cross_pkg }}
+            libmodplug-dev ninja-build \
+            lua5.3 liblua5.3-dev liblua5.3-0 \
+            libavcodec-dev libavformat-dev libavutil-dev \
+            libswscale-dev libswresample-dev libpostproc-dev \
+            liba52-0.7.4-dev libdvdread-dev libdvdnav-dev \
+            libmad0-dev libogg-dev libvorbis-dev libtheora-dev \
+            libflac-dev libfaad-dev libx264-dev libx265-dev \
+            libopus-dev libspeex-dev libspeexdsp-dev \
+            libass-dev libmatroska-dev libebml-dev \
+            libarchive-dev libxml2-dev libgnutls28-dev \
+            libsdl2-dev libxpm-dev libxcb-randr0-dev \
+            libbluray-dev libnotify-dev \
+            gettext bison flex ${{ matrix.cross_pkg }}
           
           # Install latest meson version (VLC requires >= 1.10.0)
           pip3 install --break-system-packages meson
@@ -207,7 +222,15 @@ jobs:
           
           # Build using autotools (the primary build system for VLC)
           ./bootstrap
-          ./configure --build=${TRIPLET} --host=${TRIPLET}
+          
+          if [[ "${{ matrix.arch }}" == "arm" ]]; then
+            # Cross-compilation for ARM - use both --build and --host
+            ./configure --build=x86_64-linux-gnu --host=${TRIPLET} --disable-lua
+          else
+            # Native build for x86_64
+            ./configure
+          fi
+          
           make -j$(nproc)
 
       - name: Package artifacts
@@ -252,7 +275,7 @@ jobs:
         id: setup-ndk
         with:
           ndk-version: r28b
-          add-to-path: false
+          add-to-path: true
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -261,10 +284,16 @@ jobs:
 
       - name: Build VLC for ${{ matrix.platform }}
         run: |
-          # Set environment
+          # Set environment - override the runner's default NDK
           export ANDROID_ARCH=${{ matrix.arch }}
           export TRIPLET=${{ matrix.triplet }}
           export ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }}
+          export ANDROID_NDK=$ANDROID_NDK_HOME
+          
+          # Verify NDK version
+          echo "NDK Home: $ANDROID_NDK_HOME"
+          ls -la $ANDROID_NDK_HOME/ 2>/dev/null || true
+          cat $ANDROID_NDK_HOME/source.properties 2>/dev/null || true
           
           # Clone libvlcjni
           git clone https://code.videolan.org/videolan/libvlcjni.git
