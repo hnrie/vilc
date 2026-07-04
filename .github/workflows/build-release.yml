@@ -225,10 +225,14 @@ jobs:
           
           if [[ "${{ matrix.arch }}" == "arm" ]]; then
             # Cross-compilation for ARM - use both --build and --host
-            ./configure --build=x86_64-linux-gnu --host=${TRIPLET} --disable-lua
+            ./configure --build=x86_64-linux-gnu --host=${TRIPLET} --disable-lua --disable-qt --disable-xcb --disable-wayland
           else
-            # Native build for x86_64
-            ./configure
+            # Native build for x86_64 - use contribs for dependencies
+            mkdir -p contrib && cd contrib
+            ../extras/tools/bootstrap
+            make -j$(nproc)
+            cd ..
+            ./configure --disable-lua
           fi
           
           make -j$(nproc)
